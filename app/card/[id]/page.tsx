@@ -7,6 +7,49 @@ import { supabase } from "@/lib/supabase";
 import { cardData } from "@/lib/cardData";
 
 type ScanStatus = "idle" | "loading" | "ready" | "preview" | "uploading";
+type ScanStep = "front" | "back";
+
+type UserCardRow = {
+  image_url: string | null;
+  back_image_url: string | null;
+  condition: string | null;
+  score: number | null;
+  grading_company: string | null;
+  cert_number: string | null;
+  is_graded: boolean | null;
+};
+
+const CONDITION_OPTIONS = [
+  { value: "gem_mint", label: "Gem Mint", score: 10 },
+  { value: "mint", label: "Mint", score: 9 },
+  { value: "near_mint", label: "Near Mint", score: 8 },
+  { value: "excellent", label: "Excellent", score: 7 },
+  { value: "light_played", label: "Light Played", score: 6 },
+  { value: "played", label: "Played", score: 5 },
+  { value: "poor", label: "Poor", score: 3 },
+] as const;
+
+const GRADE_OPTIONS = [
+  "10",
+  "9.5",
+  "9",
+  "8.5",
+  "8",
+  "7.5",
+  "7",
+  "6.5",
+  "6",
+  "5.5",
+  "5",
+  "4.5",
+  "4",
+  "3.5",
+  "3",
+  "2.5",
+  "2",
+  "1.5",
+  "1",
+] as const;
 
 export default function CardPage() {
   const params = useParams();
@@ -20,19 +63,44 @@ export default function CardPage() {
 
   const card = useMemo(() => cardData.find((c) => c.id === id), [id]);
 
+  // official card flip
   const [flipped, setFlipped] = useState(false);
-  const [userCard, setUserCard] = useState<string | null>(null);
+
+  // user scan flip
+  const [userFlipped, setUserFlipped] = useState(false);
+
+  // current saved user scans
+  const [frontImage, setFrontImage] = useState<string | null>(null);
+  const [backImage, setBackImage] = useState<string | null>(null);
   const [loadingCard, setLoadingCard] = useState(true);
 
+  // metadata
+  const [condition, setCondition] = useState<string>("mint");
+  const [score, setScore] = useState<string>("9");
+  const [isGraded, setIsGraded] = useState(false);
+  const [gradingCompany, setGradingCompany] = useState("");
+  const [certNumber, setCertNumber] = useState("");
+
+  // camera / scan flow
   const [cameraOpen, setCameraOpen] = useState(false);
   const [scanStatus, setScanStatus] = useState<ScanStatus>("idle");
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [scanStep, setScanStep] = useState<ScanStep>("front");
 
+  // captured preview before saving
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
 
+  // temporary front during 2-step scan flow
+  const [pendingFrontBlob, setPendingFrontBlob] = useState<Blob | null>(null);
+  const [pendingFrontPreview, setPendingFrontPreview] = useState<string | null>(
+    null
+  );
+
+  // ui
   const [toast, setToast] = useState<string | null>(null);
   const [flash, setFlash] = useState(false);
+  const [isRemoving, setIsRemoving] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -49,17 +117,23 @@ export default function CardPage() {
           ? "shadow-pink-400/30"
           : "";
 
+  const hasSavedCard = Boolean(frontImage);
+
   const showToast = (message: string) => {
     setToast(message);
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToast(null), 2200);
+    toastTimerRef.current = setTimeout(() => setToast(null), 2400);
   };
 
-  const cleanupPreview = (url?: string | null) => {
-    const target = url ?? capturedPreview;
-    if (target?.startsWith("blob:")) {
-      URL.revokeObjectURL(target);
+  const cleanupUrl = (url?: string | null) => {
+    if (url?.startsWith("blob:")) {
+      URL.revokeObjectURL(url);
     }
+  };
+
+  const cleanupPreviews = () => {
+    cleanupUrl(capturedPreview);
+    cleanupUrl(pendingFrontPreview);
   };
 
   const extractPathFromStorageUrl = (url: string) => {
@@ -68,6 +142,36 @@ export default function CardPage() {
     const idx = cleanUrl.indexOf(marker);
     if (idx === -1) return null;
     return cleanUrl.slice(idx + marker.length);
+  };
+
+  const getConditionBaseScore = (value: string) => {
+    const found = CONDITION_OPTIONS.find((c) => c.value === value);
+    return found ? String(found.score) : "9";
+  };
+
+  const resetMetadataToDefault = () => {
+    setCondition("mint");
+    setScore("9");
+    setIsGraded(false);
+    setGradingCompany("");
+    setCertNumber("");
+  };
+
+  const resetCaptureOnly = () => {
+    cleanupUrl(capturedPreview);
+    setCapturedBlob(null);
+    setCapturedPreview(null);
+    setScanStatus("ready");
+  };
+
+  const resetEntireScanFlow = () => {
+    cleanupPreviews();
+    setCapturedBlob(null);
+    setCapturedPreview(null);
+    setPendingFrontBlob(null);
+    setPendingFrontPreview(null);
+    setScanStep("front");
+    setScanStatus("ready");
   };
 
   const stopCamera = () => {
@@ -87,23 +191,31 @@ export default function CardPage() {
     setCameraOpen(false);
     setScanStatus("idle");
     setCameraError(null);
-  };
-
-  const resetCapture = () => {
-    cleanupPreview();
     setCapturedBlob(null);
+    cleanupUrl(capturedPreview);
     setCapturedPreview(null);
-    setScanStatus("ready");
+    setPendingFrontBlob(null);
+    cleanupUrl(pendingFrontPreview);
+    setPendingFrontPreview(null);
+    setScanStep("front");
   };
 
   useEffect(() => {
     return () => {
       stopCamera();
-      cleanupPreview();
+      cleanupPreviews();
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!isGraded) {
+      setScore(getConditionBaseScore(condition));
+      setGradingCompany("");
+      setCertNumber("");
+    }
+  }, [condition, isGraded]);
 
   useEffect(() => {
     const fetchUserCard = async () => {
@@ -125,15 +237,29 @@ export default function CardPage() {
 
       const { data, error } = await supabase
         .from("user_cards")
-        .select("image_url")
+        .select(
+          "image_url, back_image_url, condition, score, grading_company, cert_number, is_graded"
+        )
         .eq("user_id", user.id)
         .eq("card_id", id)
-        .maybeSingle();
+        .maybeSingle<UserCardRow>();
 
-      if (!error && data?.image_url) {
-        setUserCard(data.image_url);
+      if (!error && data) {
+        setFrontImage(data.image_url ?? null);
+        setBackImage(data.back_image_url ?? null);
+        setCondition(data.condition ?? "mint");
+        setIsGraded(Boolean(data.is_graded));
+        setScore(
+          data.score !== null && data.score !== undefined
+            ? String(data.score)
+            : getConditionBaseScore(data.condition ?? "mint")
+        );
+        setGradingCompany(data.grading_company ?? "");
+        setCertNumber(data.cert_number ?? "");
       } else {
-        setUserCard(null);
+        setFrontImage(null);
+        setBackImage(null);
+        resetMetadataToDefault();
       }
 
       setLoadingCard(false);
@@ -142,41 +268,85 @@ export default function CardPage() {
     fetchUserCard();
   }, [card, id]);
 
-  const fileFromBlob = (blob: Blob) =>
-    new File([blob], `card-${id}-${Date.now()}.jpg`, {
+  const fileFromBlob = (blob: Blob, namePrefix: string) =>
+    new File([blob], `${namePrefix}-${id}-${Date.now()}.jpg`, {
       type: "image/jpeg",
     });
 
-  const uploadCardFile = async (file: File) => {
-    if (!card) return;
+  const deleteStoredImageIfExists = async (url: string | null) => {
+    if (!url) return;
+    const path = extractPathFromStorageUrl(url);
+    if (!path) return;
 
-    setScanStatus("uploading");
+    const { error } = await supabase.storage.from("card-scans").remove([path]);
+    if (error) {
+      console.warn("Storage remove warning:", error);
+    }
+  };
+
+  const saveCardRecord = async (
+    frontUrl: string,
+    backUrl: string | null,
+    options?: {
+      replacing?: boolean;
+    }
+  ) => {
+    if (!card) return false;
 
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     if (!user) {
-      setScanStatus("idle");
       showToast("You need to be logged in.");
-      return;
+      return false;
     }
 
-    if (userCard) {
-      const oldPath = extractPathFromStorageUrl(userCard);
-      if (oldPath) {
-        const { error: removeError } = await supabase.storage
-          .from("card-scans")
-          .remove([oldPath]);
+    const parsedScore = Number(score);
 
-        if (removeError) {
-          console.warn("Old image remove warning:", removeError);
-        }
+    const { error: dbError } = await supabase.from("user_cards").upsert(
+      {
+        user_id: user.id,
+        card_id: card.id,
+        image_url: frontUrl,
+        back_image_url: backUrl,
+        condition,
+        score: Number.isFinite(parsedScore) ? parsedScore : null,
+        grading_company: isGraded ? gradingCompany.trim() : null,
+        cert_number: isGraded ? certNumber.trim() : null,
+        is_graded: isGraded,
+      },
+      {
+        onConflict: "user_id,card_id",
       }
+    );
+
+    if (dbError) {
+      console.error("DB error:", dbError);
+      showToast("Saved image, but collection update failed.");
+      return false;
+    }
+
+    setFrontImage(frontUrl);
+    setBackImage(backUrl);
+    showToast(options?.replacing ? "🔥 Card re-scanned!" : "🔥 Card added!");
+    return true;
+  };
+
+  const uploadSingleFile = async (file: File, side: "front" | "back") => {
+    if (!card) return null;
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      showToast("You need to be logged in.");
+      return null;
     }
 
     const fileExt = (file.name.split(".").pop() || "jpg").toLowerCase();
-    const filePath = `${user.id}/${card.id}-${Date.now()}.${fileExt}`;
+    const filePath = `${user.id}/${card.id}-${side}-${Date.now()}.${fileExt}`;
 
     const { error: uploadError } = await supabase.storage
       .from("card-scans")
@@ -186,42 +356,105 @@ export default function CardPage() {
       });
 
     if (uploadError) {
-      console.error("Upload error:", uploadError);
-      setScanStatus("idle");
-      showToast("Upload failed.");
-      return;
+      console.error(`${side} upload error:`, uploadError);
+      showToast(`Upload failed (${side}).`);
+      return null;
     }
 
     const { data: publicData } = supabase.storage
       .from("card-scans")
       .getPublicUrl(filePath);
 
-    const finalUrl = `${publicData.publicUrl}?t=${Date.now()}`;
+    return `${publicData.publicUrl}?t=${Date.now()}`;
+  };
 
-    const { error: dbError } = await supabase.from("user_cards").upsert(
-      {
-        user_id: user.id,
-        card_id: card.id,
-        image_url: finalUrl,
-      },
-      {
-        onConflict: "user_id,card_id",
-      }
-    );
+  const uploadCardPair = async (frontFile: File, backFile: File) => {
+    if (!card) return;
 
-    if (dbError) {
-      console.error("DB error:", dbError);
-      setScanStatus("idle");
-      showToast("Saved image, but collection update failed.");
+    setScanStatus("uploading");
+
+    const replacing = Boolean(frontImage || backImage);
+    const oldFront = frontImage;
+    const oldBack = backImage;
+
+    const frontUrl = await uploadSingleFile(frontFile, "front");
+    if (!frontUrl) {
+      setScanStatus("ready");
       return;
     }
 
-    setUserCard(finalUrl);
-    cleanupPreview();
+    const backUrl = await uploadSingleFile(backFile, "back");
+    if (!backUrl) {
+      await deleteStoredImageIfExists(frontUrl);
+      setScanStatus("ready");
+      return;
+    }
+
+    const saved = await saveCardRecord(frontUrl, backUrl, { replacing });
+
+    if (!saved) {
+      await deleteStoredImageIfExists(frontUrl);
+      await deleteStoredImageIfExists(backUrl);
+      setScanStatus("ready");
+      return;
+    }
+
+    if (replacing) {
+      await deleteStoredImageIfExists(oldFront);
+      await deleteStoredImageIfExists(oldBack);
+    }
+
+    cleanupPreviews();
     setCapturedBlob(null);
     setCapturedPreview(null);
+    setPendingFrontBlob(null);
+    setPendingFrontPreview(null);
     stopCamera();
-    showToast(userCard ? "🔥 Card re-scanned!" : "🔥 Card added to collection!");
+  };
+
+  const removeFromCollection = async () => {
+    if (!card) return;
+
+    setIsRemoving(true);
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        showToast("You need to be logged in.");
+        setIsRemoving(false);
+        return;
+      }
+
+      const oldFront = frontImage;
+      const oldBack = backImage;
+
+      const { error: deleteError } = await supabase
+        .from("user_cards")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("card_id", card.id);
+
+      if (deleteError) {
+        console.error("Delete row error:", deleteError);
+        showToast("Could not remove card.");
+        setIsRemoving(false);
+        return;
+      }
+
+      await deleteStoredImageIfExists(oldFront);
+      await deleteStoredImageIfExists(oldBack);
+
+      setFrontImage(null);
+      setBackImage(null);
+      setUserFlipped(false);
+      resetMetadataToDefault();
+      showToast("❌ Card removed from collection.");
+    } finally {
+      setIsRemoving(false);
+    }
   };
 
   const openNativeFallback = () => {
@@ -230,9 +463,12 @@ export default function CardPage() {
 
   const startCamera = async () => {
     setCameraError(null);
+    cleanupPreviews();
     setCapturedBlob(null);
-    cleanupPreview();
     setCapturedPreview(null);
+    setPendingFrontBlob(null);
+    setPendingFrontPreview(null);
+    setScanStep("front");
     setCameraOpen(true);
     setScanStatus("loading");
 
@@ -310,7 +546,7 @@ export default function CardPage() {
           return;
         }
 
-        cleanupPreview();
+        cleanupUrl(capturedPreview);
         const previewUrl = URL.createObjectURL(blob);
         setCapturedBlob(blob);
         setCapturedPreview(previewUrl);
@@ -323,7 +559,52 @@ export default function CardPage() {
 
   const confirmCapturedUpload = async () => {
     if (!capturedBlob) return;
-    await uploadCardFile(fileFromBlob(capturedBlob));
+
+    if (scanStep === "front") {
+      cleanupUrl(pendingFrontPreview);
+      setPendingFrontBlob(capturedBlob);
+      setPendingFrontPreview(capturedPreview);
+      setCapturedBlob(null);
+      setCapturedPreview(null);
+      setScanStep("back");
+      setScanStatus("ready");
+      showToast("Now scan the back.");
+      return;
+    }
+
+    if (!pendingFrontBlob) {
+      showToast("Front image missing. Start over.");
+      cleanupPreviews();
+      setCapturedBlob(null);
+      setCapturedPreview(null);
+      setPendingFrontBlob(null);
+      setPendingFrontPreview(null);
+      setScanStep("front");
+      setScanStatus("ready");
+      return;
+    }
+
+    const frontFile = fileFromBlob(pendingFrontBlob, "front");
+    const backFile = fileFromBlob(capturedBlob, "back");
+    await uploadCardPair(frontFile, backFile);
+  };
+
+  const retakeCurrentStep = () => {
+    cleanupUrl(capturedPreview);
+    setCapturedBlob(null);
+    setCapturedPreview(null);
+    setScanStatus("ready");
+  };
+
+  const restartWholeScan = () => {
+    cleanupPreviews();
+    setCapturedBlob(null);
+    setCapturedPreview(null);
+    setPendingFrontBlob(null);
+    setPendingFrontPreview(null);
+    setScanStep("front");
+    setScanStatus("ready");
+    showToast("Scan restarted.");
   };
 
   const handleFallbackFile = async (
@@ -332,7 +613,28 @@ export default function CardPage() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    await uploadCardFile(file);
+
+    if (scanStep === "front") {
+      cleanupUrl(pendingFrontPreview);
+      const url = URL.createObjectURL(file);
+      setPendingFrontBlob(file);
+      setPendingFrontPreview(url);
+      setScanStep("back");
+      setScanStatus("ready");
+      showToast("Front selected. Now choose the back.");
+      return;
+    }
+
+    if (!pendingFrontBlob) {
+      showToast("Choose the front first.");
+      setScanStep("front");
+      return;
+    }
+
+    await uploadCardPair(
+      fileFromBlob(pendingFrontBlob, "front"),
+      fileFromBlob(file, "back")
+    );
   };
 
   if (Number.isNaN(id)) {
@@ -378,7 +680,8 @@ export default function CardPage() {
         </button>
       </Link>
 
-      <div className="mx-auto flex max-w-5xl flex-col gap-8 lg:flex-row lg:items-start">
+      <div className="mx-auto flex max-w-6xl flex-col gap-8 lg:flex-row lg:items-start">
+        {/* LEFT SIDE */}
         <div className="mx-auto flex w-full max-w-sm flex-col items-center">
           <div
             onClick={() => setFlipped(!flipped)}
@@ -427,34 +730,46 @@ export default function CardPage() {
           </div>
         </div>
 
-        <div className="mx-auto flex w-full max-w-xl flex-col gap-4 rounded-3xl border border-white/10 bg-zinc-950/70 p-4 shadow-2xl backdrop-blur">
+        {/* RIGHT SIDE */}
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 rounded-3xl border border-white/10 bg-zinc-950/70 p-4 shadow-2xl backdrop-blur">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-lg font-semibold">Your Collection Scan</h3>
               <p className="text-sm text-zinc-400">
-                Add your own photo of this card and replace it anytime.
+                Scan front + back, track condition, and store grading details.
               </p>
             </div>
 
-            {userCard && (
+            {hasSavedCard && (
               <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-300">
                 Collected
               </span>
             )}
           </div>
 
+          {/* USER CARD PREVIEW */}
           <div className="overflow-hidden rounded-2xl border border-white/10 bg-black">
             <div className="relative aspect-[3/4] w-full">
               {loadingCard ? (
                 <div className="flex h-full items-center justify-center text-zinc-500">
                   Loading...
                 </div>
-              ) : userCard ? (
-                <img
-                  src={userCard}
-                  alt={`Your ${card.name} scan`}
-                  className="h-full w-full object-cover"
-                />
+              ) : hasSavedCard ? (
+                <button
+                  type="button"
+                  onClick={() => setUserFlipped(!userFlipped)}
+                  className="h-full w-full"
+                >
+                  <img
+                    src={
+                      userFlipped
+                        ? backImage || frontImage || ""
+                        : frontImage || ""
+                    }
+                    alt={`Your ${card.name} scan`}
+                    className="h-full w-full object-cover"
+                  />
+                </button>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 bg-gradient-to-b from-zinc-950 to-zinc-900 text-center">
                   <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-white/5 text-2xl">
@@ -471,23 +786,181 @@ export default function CardPage() {
             </div>
           </div>
 
+          {/* TEMP FRONT/BACK STATUS */}
+          {(pendingFrontPreview || capturedPreview || cameraOpen) && (
+            <div className="rounded-2xl border border-white/10 bg-zinc-900/70 p-4">
+              <div className="text-sm font-semibold">Scan Progress</div>
+              <div className="mt-2 grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+                  <div className="mb-2 text-zinc-400">Front</div>
+                  {pendingFrontPreview || frontImage ? (
+                    <div className="text-emerald-300">Captured</div>
+                  ) : (
+                    <div className="text-zinc-500">Waiting</div>
+                  )}
+                </div>
+                <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+                  <div className="mb-2 text-zinc-400">Back</div>
+                  {scanStep === "back" && !capturedPreview && !backImage ? (
+                    <div className="text-yellow-300">Next step</div>
+                  ) : backImage ? (
+                    <div className="text-emerald-300">Captured</div>
+                  ) : (
+                    <div className="text-zinc-500">Waiting</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {cameraError && (
             <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
               {cameraError}
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {/* CONDITION + GRADE */}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-zinc-900/70 p-4">
+              <label className="mb-2 block text-sm font-medium text-zinc-300">
+                Card Condition
+              </label>
+              <select
+                value={condition}
+                onChange={(e) => setCondition(e.target.value)}
+                className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none"
+              >
+                {CONDITION_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <div className="mt-3 text-xs text-zinc-500">
+                Ungraded cards use this condition to estimate a score.
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-zinc-900/70 p-4">
+              <label className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-300">
+                <input
+                  type="checkbox"
+                  checked={isGraded}
+                  onChange={(e) => setIsGraded(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                Graded Card
+              </label>
+
+              <label className="mb-2 block text-sm text-zinc-400">
+                Score
+              </label>
+              <select
+                value={score}
+                onChange={(e) => setScore(e.target.value)}
+                disabled={!isGraded}
+                className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none disabled:opacity-60"
+              >
+                {isGraded
+                  ? GRADE_OPTIONS.map((grade) => (
+                      <option key={grade} value={grade}>
+                        {grade}
+                      </option>
+                    ))
+                  : null}
+                {!isGraded && (
+                  <option value={getConditionBaseScore(condition)}>
+                    {getConditionBaseScore(condition)}
+                  </option>
+                )}
+              </select>
+
+              <div className="mt-3 text-xs text-zinc-500">
+                {isGraded
+                  ? "Use the slab grade."
+                  : "Ungraded score is auto-based on condition."}
+              </div>
+            </div>
+          </div>
+
+          {isGraded && (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="rounded-2xl border border-white/10 bg-zinc-900/70 p-4">
+                <label className="mb-2 block text-sm font-medium text-zinc-300">
+                  Grading Company
+                </label>
+                <select
+                  value={gradingCompany}
+                  onChange={(e) => setGradingCompany(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none"
+                >
+                  <option value="">Select company</option>
+                  <option value="PSA">PSA</option>
+                  <option value="CGC">CGC</option>
+                  <option value="TAG">TAG</option>
+                  <option value="BGS">BGS</option>
+                  <option value="SGC">SGC</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-zinc-900/70 p-4">
+                <label className="mb-2 block text-sm font-medium text-zinc-300">
+                  Cert Number
+                </label>
+                <input
+                  value={certNumber}
+                  onChange={(e) => setCertNumber(e.target.value)}
+                  placeholder="Enter cert number"
+                  className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* SUMMARY */}
+          <div className="rounded-2xl border border-white/10 bg-zinc-900/70 p-4">
+            <div className="text-sm font-semibold">Card Details</div>
+            <div className="mt-3 grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+              <div className="rounded-xl bg-black/30 p-3">
+                <div className="text-zinc-500">Condition</div>
+                <div className="mt-1 font-medium">
+                  {CONDITION_OPTIONS.find((c) => c.value === condition)?.label ??
+                    "Mint"}
+                </div>
+              </div>
+              <div className="rounded-xl bg-black/30 p-3">
+                <div className="text-zinc-500">Score</div>
+                <div className="mt-1 font-medium">{score}</div>
+              </div>
+              <div className="rounded-xl bg-black/30 p-3">
+                <div className="text-zinc-500">Graded</div>
+                <div className="mt-1 font-medium">{isGraded ? "Yes" : "No"}</div>
+              </div>
+              <div className="rounded-xl bg-black/30 p-3">
+                <div className="text-zinc-500">Company</div>
+                <div className="mt-1 font-medium">
+                  {isGraded ? gradingCompany || "—" : "—"}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ACTION BUTTONS */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <button
               onClick={startCamera}
               disabled={
-                scanStatus === "uploading" || scanStatus === "loading"
+                scanStatus === "uploading" ||
+                scanStatus === "loading" ||
+                isRemoving
               }
               className="rounded-2xl bg-gradient-to-r from-red-500 via-white to-red-500 p-[1px] transition hover:scale-[1.01] disabled:opacity-60"
             >
               <span className="flex w-full items-center justify-center gap-2 rounded-2xl bg-black px-4 py-3 font-semibold">
                 <span className="text-lg">🔴</span>
-                {userCard ? "Re-scan Card" : "Open Poké Scan"}
+                {hasSavedCard ? "Re-scan Card" : "Open Poké Scan"}
               </span>
             </button>
 
@@ -500,10 +973,19 @@ export default function CardPage() {
                 onChange={handleFallbackFile}
               />
             </label>
+
+            <button
+              onClick={removeFromCollection}
+              disabled={!hasSavedCard || isRemoving || scanStatus === "uploading"}
+              className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-center font-medium text-red-200 transition hover:bg-red-500/20 disabled:opacity-50"
+            >
+              {isRemoving ? "Removing..." : "Remove Card"}
+            </button>
           </div>
 
           <p className="text-xs text-zinc-500">
-            Best results: place the card on a dark surface, fill the frame, and avoid glare.
+            Best results: place the card on a dark surface, fill the frame, and
+            avoid glare. Scan front first, then back.
           </p>
         </div>
       </div>
@@ -521,9 +1003,13 @@ export default function CardPage() {
           <div className="absolute inset-0 bg-black/20" />
 
           <div className="absolute left-1/2 top-6 z-10 w-[92%] max-w-md -translate-x-1/2 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-center backdrop-blur">
-            <div className="text-sm font-semibold">Poké Scan</div>
+            <div className="text-sm font-semibold">
+              Poké Scan — {scanStep === "front" ? "Front Side" : "Back Side"}
+            </div>
             <div className="mt-1 text-xs text-zinc-300">
-              Center the card inside the frame and tap capture.
+              {scanStep === "front"
+                ? "Center the FRONT of the card inside the frame and tap capture."
+                : "Now center the BACK of the card and tap capture."}
             </div>
           </div>
 
@@ -549,7 +1035,7 @@ export default function CardPage() {
 
                 <div className="grid w-full grid-cols-2 gap-3">
                   <button
-                    onClick={resetCapture}
+                    onClick={retakeCurrentStep}
                     disabled={scanStatus === "uploading"}
                     className="rounded-2xl border border-white/10 bg-zinc-900 px-4 py-3 font-medium disabled:opacity-60"
                   >
@@ -561,9 +1047,22 @@ export default function CardPage() {
                     disabled={scanStatus === "uploading"}
                     className="rounded-2xl bg-yellow-400 px-4 py-3 font-semibold text-black disabled:opacity-60"
                   >
-                    {scanStatus === "uploading" ? "Saving..." : "Use This Scan"}
+                    {scanStatus === "uploading"
+                      ? "Saving..."
+                      : scanStep === "front"
+                        ? "Use Front Scan"
+                        : "Use Back Scan"}
                   </button>
                 </div>
+
+                {pendingFrontPreview && scanStep === "back" && (
+                  <button
+                    onClick={restartWholeScan}
+                    className="text-sm text-zinc-400 underline"
+                  >
+                    Restart full scan
+                  </button>
+                )}
               </div>
             ) : (
               <div className="mx-auto flex max-w-md items-center justify-between gap-4">
