@@ -10,16 +10,16 @@ export default function Home() {
   useEffect(() => {
     checkUser();
 
-    // 🔥 listen for login event
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (event) => {
-        if (event === "SIGNED_IN") {
-          window.location.href = "/dashboard";
-        }
+    // 🔥 listen for login event (instant redirect after magic link)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_IN") {
+        window.location.href = "/dashboard";
       }
-    );
+    });
 
-    return () => listener.subscription.unsubscribe();
+    return () => subscription.unsubscribe();
   }, []);
 
   const checkUser = async () => {
@@ -40,7 +40,9 @@ export default function Home() {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: "http://localhost:3000",
+        // ✅ THIS FIXES LOCALHOST ISSUE
+        emailRedirectTo:
+          process.env.NEXT_PUBLIC_SITE_URL + "/dashboard",
       },
     });
 
