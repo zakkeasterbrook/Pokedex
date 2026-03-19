@@ -5,19 +5,18 @@ export type Card = {
   name: string;
   type: CardType;
   rarity: "common" | "rare" | "legendary" | "promo" | "checklist";
-  image: string;
+  frontImage: string;
+  backImage: string;
 };
 
-export const cardData: Card[] = [
-  // 🟢 PROMO
-  {
-    id: 0,
-    name: "Venusaur Town Map",
-    type: "promo",
-    rarity: "promo",
-    image: "/cards/0.png",
-  },
+// 🔥 helper functions for YOUR naming system
+const getFront = (index: number) =>
+  `/cards/front/Bandai_-_Carddass_-_green_${index}.jpg`;
 
+const getBack = (index: number) =>
+  `/cards/back/Bandai_-_Carddass_-_green_back_${index}.jpg`;
+
+export const cardData: Card[] = [
   // 🔥 POKÉMON (1–151)
   ...[
     "Bulbasaur","Ivysaur","Venusaur","Charmander","Charmeleon","Charizard",
@@ -44,7 +43,8 @@ export const cardData: Card[] = [
     "Kabutops","Aerodactyl","Snorlax","Articuno","Zapdos","Moltres",
     "Dratini","Dragonair","Dragonite","Mewtwo","Mew"
   ].map((name, index) => {
-    const id = index + 1;
+    const id = index + 1;        // 1 → 151
+    const fileIndex = index + 1; // matches your files
 
     const legendaryIds = [144, 145, 146, 150, 151];
 
@@ -59,23 +59,36 @@ export const cardData: Card[] = [
       name,
       type: "pokemon" as const,
       rarity,
-      image: `/cards/${id}.png`,
+      frontImage: getFront(fileIndex),
+      backImage: getBack(fileIndex),
     };
   }),
 
-  // 🔵 CHECKLIST
+  // 🟢 PROMO (NO MORE ID 0 🚫)
   {
     id: 152,
+    name: "Venusaur Town Map",
+    type: "promo",
+    rarity: "promo",
+    frontImage: getFront(0), // uses file 0
+    backImage: getBack(0),
+  },
+
+  // 🔵 CHECKLISTS
+  {
+    id: 153,
     name: "Pokédex Checklist 1",
     type: "checklist",
     rarity: "checklist",
-    image: "/cards/152.png",
+    frontImage: getFront(152),
+    backImage: getBack(152),
   },
   {
-    id: 153,
+    id: 154,
     name: "Pokédex Checklist 2",
     type: "checklist",
     rarity: "checklist",
-    image: "/cards/153.png",
+    frontImage: getFront(153),
+    backImage: getBack(153),
   },
 ];

@@ -17,24 +17,32 @@ export default function Dashboard() {
   }, []);
 
   const init = async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    if (!user) {
-      setLoading(false);
-      return;
-    }
+      if (!user) {
+        setLoading(false);
+        return;
+      }
 
-    setUserEmail(user.email ?? null);
+      setUserEmail(user.email ?? null);
 
-    const { data } = await supabase
-      .from("user_cards")
-      .select("card_id")
-      .eq("user_id", user.id);
+      const { data, error } = await supabase
+        .from("user_cards")
+        .select("card_id")
+        .eq("user_id", user.id);
 
-    if (data) {
-      setOwnedCards(data.map((c) => Number(c.card_id)));
+      if (error) {
+        console.error("Supabase error:", error);
+      }
+
+      if (data) {
+        setOwnedCards(data.map((c) => Number(c.card_id)));
+      }
+    } catch (err) {
+      console.error("Init error:", err);
     }
 
     setLoading(false);
@@ -109,42 +117,60 @@ export default function Dashboard() {
           return (
             <Link key={card.id} href={`/card/${card.id}`}>
               <div
-                className={`relative rounded-xl overflow-hidden transition-all duration-300 transform
-                ${isOwned
-                  ? "hover:scale-105 shadow-xl"
-                  : "opacity-40 grayscale hover:opacity-70"
+                className={`relative rounded-xl overflow-hidden transition-all duration-300 transform group
+                ${
+                  isOwned
+                    ? "hover:scale-105 shadow-xl hover:shadow-yellow-400/20"
+                    : "opacity-50 grayscale blur-[1px] hover:opacity-80 hover:blur-0"
                 }`}
               >
 
                 {/* CARD FRAME */}
-                <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-2">
+                <div className="bg-gradient-to-b from-zinc-900 to-black border border-zinc-700 rounded-xl p-2">
 
                   {/* IMAGE */}
-                  <div className="aspect-[3/4] bg-black rounded-lg overflow-hidden">
+                  <div className="aspect-[3/4] bg-black rounded-lg overflow-hidden relative">
+
                     <img
-                      src={card.image}
+                      src={card.frontImage}
                       alt={card.name}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      onError={(e) => {
+                        e.currentTarget.src = "/fallback.png";
+                      }}
                     />
+
+                    {/* LOCKED OVERLAY */}
+                    {!isOwned && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                        <span className="text-xs text-white font-bold tracking-widest opacity-80">
+                          LOCKED
+                        </span>
+                      </div>
+                    )}
+
                   </div>
 
-                  {/* DATA BAR (Carddass style) */}
+                  {/* DATA BAR */}
                   <div className="mt-2 bg-zinc-800 rounded-md px-2 py-1 flex justify-between items-center">
 
                     <span className="text-[10px] font-bold text-zinc-300">
                       {String(card.id).padStart(3, "0")}
                     </span>
 
-                    <span className="text-[10px] font-bold text-yellow-400 truncate">
+                    <span className="text-[10px] font-bold text-yellow-400 truncate max-w-[70%]">
                       {card.name}
                     </span>
 
                   </div>
                 </div>
 
-                {/* LEGENDARY GLOW */}
+                {/* LEGENDARY EFFECT */}
                 {card.rarity === "legendary" && isOwned && (
-                  <div className="absolute inset-0 rounded-xl border-2 border-purple-400 shadow-purple-500/40 shadow-lg pointer-events-none" />
+                  <>
+                    <div className="absolute inset-0 rounded-xl border-2 border-purple-400 shadow-purple-500/40 shadow-lg animate-pulse pointer-events-none" />
+                    <div className="absolute inset-0 bg-gradient-to-br from-purple-400/10 to-yellow-400/10 pointer-events-none" />
+                  </>
                 )}
 
               </div>
