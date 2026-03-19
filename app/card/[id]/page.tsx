@@ -17,6 +17,8 @@ type UserCardRow = {
   grading_company: string | null;
   cert_number: string | null;
   is_graded: boolean | null;
+  purchase_price: number | null;
+  purchase_date: string | null;
 };
 
 const CONDITION_OPTIONS = [
@@ -80,6 +82,8 @@ export default function CardPage() {
   const [isGraded, setIsGraded] = useState(false);
   const [gradingCompany, setGradingCompany] = useState("");
   const [certNumber, setCertNumber] = useState("");
+  const [purchasePrice, setPurchasePrice] = useState<string>("");
+  const [purchaseDate, setPurchaseDate] = useState<string>("");
 
   // camera / scan flow
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -155,13 +159,8 @@ export default function CardPage() {
     setIsGraded(false);
     setGradingCompany("");
     setCertNumber("");
-  };
-
-  const resetCaptureOnly = () => {
-    cleanupUrl(capturedPreview);
-    setCapturedBlob(null);
-    setCapturedPreview(null);
-    setScanStatus("ready");
+    setPurchasePrice("");
+    setPurchaseDate("");
   };
 
   const resetEntireScanFlow = () => {
@@ -238,7 +237,7 @@ export default function CardPage() {
       const { data, error } = await supabase
         .from("user_cards")
         .select(
-          "image_url, back_image_url, condition, score, grading_company, cert_number, is_graded"
+          "image_url, back_image_url, condition, score, grading_company, cert_number, is_graded, purchase_price, purchase_date"
         )
         .eq("user_id", user.id)
         .eq("card_id", id)
@@ -256,6 +255,12 @@ export default function CardPage() {
         );
         setGradingCompany(data.grading_company ?? "");
         setCertNumber(data.cert_number ?? "");
+        setPurchasePrice(
+          data.purchase_price !== null && data.purchase_price !== undefined
+            ? String(data.purchase_price)
+            : ""
+        );
+        setPurchaseDate(data.purchase_date ?? "");
       } else {
         setFrontImage(null);
         setBackImage(null);
@@ -303,6 +308,18 @@ export default function CardPage() {
     }
 
     const parsedScore = Number(score);
+    const parsedPurchasePrice =
+      purchasePrice.trim() === "" ? null : Number(purchasePrice);
+    const normalizedPurchaseDate =
+      purchaseDate.trim() === "" ? null : purchaseDate.trim();
+
+    if (
+      parsedPurchasePrice !== null &&
+      (!Number.isFinite(parsedPurchasePrice) || parsedPurchasePrice < 0)
+    ) {
+      showToast("Enter a valid purchase price.");
+      return false;
+    }
 
     const { error: dbError } = await supabase.from("user_cards").upsert(
       {
@@ -312,9 +329,11 @@ export default function CardPage() {
         back_image_url: backUrl,
         condition,
         score: Number.isFinite(parsedScore) ? parsedScore : null,
-        grading_company: isGraded ? gradingCompany.trim() : null,
-        cert_number: isGraded ? certNumber.trim() : null,
+        grading_company: isGraded ? gradingCompany.trim() || null : null,
+        cert_number: isGraded ? certNumber.trim() || null : null,
         is_graded: isGraded,
+        purchase_price: parsedPurchasePrice,
+        purchase_date: normalizedPurchaseDate,
       },
       {
         onConflict: "user_id,card_id",
@@ -597,13 +616,7 @@ export default function CardPage() {
   };
 
   const restartWholeScan = () => {
-    cleanupPreviews();
-    setCapturedBlob(null);
-    setCapturedPreview(null);
-    setPendingFrontBlob(null);
-    setPendingFrontPreview(null);
-    setScanStep("front");
-    setScanStatus("ready");
+    resetEntireScanFlow();
     showToast("Scan restarted.");
   };
 
@@ -635,6 +648,27 @@ export default function CardPage() {
       fileFromBlob(pendingFrontBlob, "front"),
       fileFromBlob(file, "back")
     );
+  };
+
+  const formatCurrencyPreview = (value: string) => {
+    if (!value.trim()) return "—";
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return "—";
+    return amount.toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
+    });
+  };
+
+  const formatDatePreview = (value: string) => {
+    if (!value.trim()) return "—";
+    const date = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return "—";
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
   };
 
   if (Number.isNaN(id)) {
@@ -736,7 +770,8 @@ export default function CardPage() {
             <div>
               <h3 className="text-lg font-semibold">Your Collection Scan</h3>
               <p className="text-sm text-zinc-400">
-                Scan front + back, track condition, and store grading details.
+                Scan front + back, track condition, grading details, price paid,
+                and purchase date.
               </p>
             </div>
 
@@ -919,10 +954,51 @@ export default function CardPage() {
             </div>
           )}
 
+          {/* PURCHASE DETAILS */}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-zinc-900/70 p-4">
+              <label className="mb-2 block text-sm font-medium text-zinc-300">
+                Price Paid
+              </label>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-zinc-500">
+                  $
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={purchasePrice}
+                  onChange={(e) => setPurchasePrice(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full rounded-xl border border-white/10 bg-black/40 py-2 pl-8 pr-3 text-sm outline-none"
+                />
+              </div>
+              <div className="mt-3 text-xs text-zinc-500">
+                Used for total collection value on the dashboard.
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-zinc-900/70 p-4">
+              <label className="mb-2 block text-sm font-medium text-zinc-300">
+                Purchase Date
+              </label>
+              <input
+                type="date"
+                value={purchaseDate}
+                onChange={(e) => setPurchaseDate(e.target.value)}
+                className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none"
+              />
+              <div className="mt-3 text-xs text-zinc-500">
+                Keep track of when you picked up the card.
+              </div>
+            </div>
+          </div>
+
           {/* SUMMARY */}
           <div className="rounded-2xl border border-white/10 bg-zinc-900/70 p-4">
             <div className="text-sm font-semibold">Card Details</div>
-            <div className="mt-3 grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+            <div className="mt-3 grid grid-cols-2 gap-3 text-sm md:grid-cols-3 xl:grid-cols-6">
               <div className="rounded-xl bg-black/30 p-3">
                 <div className="text-zinc-500">Condition</div>
                 <div className="mt-1 font-medium">
@@ -942,6 +1018,18 @@ export default function CardPage() {
                 <div className="text-zinc-500">Company</div>
                 <div className="mt-1 font-medium">
                   {isGraded ? gradingCompany || "—" : "—"}
+                </div>
+              </div>
+              <div className="rounded-xl bg-black/30 p-3">
+                <div className="text-zinc-500">Paid</div>
+                <div className="mt-1 font-medium">
+                  {formatCurrencyPreview(purchasePrice)}
+                </div>
+              </div>
+              <div className="rounded-xl bg-black/30 p-3">
+                <div className="text-zinc-500">Date</div>
+                <div className="mt-1 font-medium">
+                  {formatDatePreview(purchaseDate)}
                 </div>
               </div>
             </div>
