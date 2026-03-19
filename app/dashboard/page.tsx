@@ -16,29 +16,24 @@ export default function Dashboard() {
   }, []);
 
   const init = async () => {
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-      if (!user) {
-        setLoading(false);
-        return;
-      }
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
-      setUserEmail(user.email ?? null);
+    setUserEmail(user.email ?? null);
 
-      const { data } = await supabase
-        .from("user_cards")
-        .select("card_id")
-        .eq("user_id", user.id);
+    const { data } = await supabase
+      .from("user_cards")
+      .select("card_id")
+      .eq("user_id", user.id);
 
-      if (data) {
-        // 🔥 IMPORTANT: convert to number
-        setOwnedCards(data.map((c) => Number(c.card_id)));
-      }
-    } catch (err) {
-      console.error(err);
+    if (data) {
+      setOwnedCards(data.map((c) => Number(c.card_id)));
     }
 
     setLoading(false);
@@ -55,19 +50,19 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center text-lg animate-pulse">
+      <main className="min-h-screen flex items-center justify-center bg-black text-white text-lg animate-pulse">
         Loading Pokédex...
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-black via-zinc-900 to-black text-white px-4 py-6">
+    <main className="min-h-screen bg-gradient-to-br from-black via-zinc-900 to-black text-white px-4 py-6">
 
       {/* HEADER */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight">
+          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-yellow-300 to-yellow-500 bg-clip-text text-transparent">
             Pokédex
           </h1>
           <p className="text-xs text-zinc-400">
@@ -86,7 +81,7 @@ export default function Dashboard() {
       </div>
 
       {/* PROGRESS CARD */}
-      <div className="mb-6 p-4 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-lg">
+      <div className="mb-6 p-5 rounded-2xl bg-white/5 backdrop-blur-xl border border-white/10 shadow-2xl">
 
         <div className="flex justify-between items-center mb-2">
           <p className="text-sm text-zinc-300">
@@ -99,10 +94,8 @@ export default function Dashboard() {
 
         <div className="w-full bg-zinc-800 rounded-full h-3 overflow-hidden">
           <div
-            className="bg-gradient-to-r from-yellow-400 to-yellow-600 h-3 rounded-full transition-all duration-700"
-            style={{
-              width: `${percent}%`,
-            }}
+            className="bg-gradient-to-r from-yellow-300 via-yellow-400 to-yellow-500 h-3 rounded-full transition-all duration-1000 ease-out shadow-lg"
+            style={{ width: `${percent}%` }}
           />
         </div>
 
@@ -115,18 +108,18 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 gap-3 mb-6">
 
         <Link href="/scan">
-          <button className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 rounded-xl shadow-md transition">
-            📸 Scan
+          <button className="w-full bg-gradient-to-r from-yellow-400 to-yellow-500 hover:from-yellow-300 hover:to-yellow-400 text-black font-bold py-3 rounded-xl shadow-lg transition transform active:scale-95">
+            📸 Scan Card
           </button>
         </Link>
 
-        <button className="w-full bg-zinc-800 hover:bg-zinc-700 py-3 rounded-xl transition">
+        <button className="w-full bg-white/5 backdrop-blur-xl border border-white/10 hover:bg-white/10 py-3 rounded-xl transition">
           🔍 Search
         </button>
 
       </div>
 
-      {/* COLLECTION GRID */}
+      {/* GRID */}
       <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
 
         {Array.from({ length: TOTAL_CARDS }, (_, i) => {
@@ -136,11 +129,11 @@ export default function Dashboard() {
           return (
             <Link key={number} href={`/card/${number}`}>
               <div
-                className={`aspect-square rounded-xl flex items-center justify-center text-xs font-bold transition-all duration-200
+                className={`aspect-square rounded-xl flex items-center justify-center text-xs font-bold transition-all duration-300 transform
                 ${
                   isOwned
-                    ? "bg-gradient-to-br from-yellow-400 to-yellow-600 text-black shadow-lg scale-100 hover:scale-105"
-                    : "bg-zinc-900 border border-zinc-800 text-zinc-600 hover:bg-zinc-800"
+                    ? "bg-gradient-to-br from-yellow-300 to-yellow-500 text-black shadow-xl hover:scale-110 hover:shadow-yellow-500/50"
+                    : "bg-zinc-900 border border-zinc-800 text-zinc-600 hover:bg-zinc-800 hover:scale-105"
                 }`}
               >
                 {isOwned ? number : "—"}
