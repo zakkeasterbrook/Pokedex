@@ -84,6 +84,7 @@ export default function CardPage() {
   const [certNumber, setCertNumber] = useState("");
   const [purchasePrice, setPurchasePrice] = useState<string>("");
   const [purchaseDate, setPurchaseDate] = useState<string>("");
+  const [savingDetails, setSavingDetails] = useState(false);
 
   // camera / scan flow
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -289,6 +290,93 @@ export default function CardPage() {
     }
   };
 
+  const validateDetails = () => {
+    const parsedPurchasePrice =
+      purchasePrice.trim() === "" ? null : Number(purchasePrice);
+    const parsedScore = Number(score);
+
+    if (
+      parsedPurchasePrice !== null &&
+      (!Number.isFinite(parsedPurchasePrice) || parsedPurchasePrice < 0)
+    ) {
+      showToast("Enter a valid purchase price.");
+      return false;
+    }
+
+    if (isGraded) {
+      if (!gradingCompany.trim()) {
+        showToast("Select a grading company.");
+        return false;
+      }
+
+      if (!certNumber.trim()) {
+        showToast("Enter the cert number.");
+        return false;
+      }
+    }
+
+    if (!Number.isFinite(parsedScore)) {
+      showToast("Enter a valid score.");
+      return false;
+    }
+
+    return true;
+  };
+
+  const saveDetailsOnly = async () => {
+    if (!card) return;
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      showToast("You need to be logged in.");
+      return;
+    }
+
+    if (!frontImage) {
+      showToast("Scan this card first before saving details.");
+      return;
+    }
+
+    if (!validateDetails()) return;
+
+    setSavingDetails(true);
+
+    try {
+      const parsedScore = Number(score);
+      const parsedPurchasePrice =
+        purchasePrice.trim() === "" ? null : Number(purchasePrice);
+      const normalizedPurchaseDate =
+        purchaseDate.trim() === "" ? null : purchaseDate.trim();
+
+      const { error } = await supabase
+        .from("user_cards")
+        .update({
+          condition,
+          score: Number.isFinite(parsedScore) ? parsedScore : null,
+          grading_company: isGraded ? gradingCompany.trim() || null : null,
+          cert_number: isGraded ? certNumber.trim() || null : null,
+          is_graded: isGraded,
+          purchase_price: parsedPurchasePrice,
+          purchase_date: normalizedPurchaseDate,
+        })
+        .eq("user_id", user.id)
+        .eq("card_id", card.id);
+
+      if (error) {
+        console.error("Save details error:", error);
+        showToast("Could not save details.");
+        return;
+      }
+
+      showToast("✅ Card details updated.");
+    } finally {
+      setSavingDetails(false);
+    }
+  };
+
   const saveCardRecord = async (
     frontUrl: string,
     backUrl: string | null,
@@ -307,19 +395,13 @@ export default function CardPage() {
       return false;
     }
 
+    if (!validateDetails()) return false;
+
     const parsedScore = Number(score);
     const parsedPurchasePrice =
       purchasePrice.trim() === "" ? null : Number(purchasePrice);
     const normalizedPurchaseDate =
       purchaseDate.trim() === "" ? null : purchaseDate.trim();
-
-    if (
-      parsedPurchasePrice !== null &&
-      (!Number.isFinite(parsedPurchasePrice) || parsedPurchasePrice < 0)
-    ) {
-      showToast("Enter a valid purchase price.");
-      return false;
-    }
 
     const { error: dbError } = await supabase.from("user_cards").upsert(
       {
@@ -1036,13 +1118,14 @@ export default function CardPage() {
           </div>
 
           {/* ACTION BUTTONS */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <button
               onClick={startCamera}
               disabled={
                 scanStatus === "uploading" ||
                 scanStatus === "loading" ||
-                isRemoving
+                isRemoving ||
+                savingDetails
               }
               className="rounded-2xl bg-gradient-to-r from-red-500 via-white to-red-500 p-[1px] transition hover:scale-[1.01] disabled:opacity-60"
             >
@@ -1063,8 +1146,26 @@ export default function CardPage() {
             </label>
 
             <button
+              onClick={saveDetailsOnly}
+              disabled={
+                !hasSavedCard ||
+                savingDetails ||
+                isRemoving ||
+                scanStatus === "uploading"
+              }
+              className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center font-medium text-emerald-200 transition hover:bg-emerald-500/20 disabled:opacity-50"
+            >
+              {savingDetails ? "Saving..." : "Save Details"}
+            </button>
+
+            <button
               onClick={removeFromCollection}
-              disabled={!hasSavedCard || isRemoving || scanStatus === "uploading"}
+              disabled={
+                !hasSavedCard ||
+                isRemoving ||
+                savingDetails ||
+                scanStatus === "uploading"
+              }
               className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-center font-medium text-red-200 transition hover:bg-red-500/20 disabled:opacity-50"
             >
               {isRemoving ? "Removing..." : "Remove Card"}
@@ -1073,7 +1174,9 @@ export default function CardPage() {
 
           <p className="text-xs text-zinc-500">
             Best results: place the card on a dark surface, fill the frame, and
-            avoid glare. Scan front first, then back.
+            avoid glare. Scan front first, then back. After a card is already in
+            your collection, you can update price, date, condition, and grading
+            info with Save Details without re-scanning.
           </p>
         </div>
       </div>

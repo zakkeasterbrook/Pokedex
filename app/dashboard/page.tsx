@@ -89,7 +89,7 @@ export default function Dashboard() {
   const latestPurchaseDate = useMemo(() => {
     const dated = userCards
       .map((c) => c.purchase_date)
-      .filter(Boolean)
+      .filter((date): date is string => Boolean(date))
       .sort()
       .reverse();
 
@@ -118,16 +118,23 @@ export default function Dashboard() {
       maximumFractionDigits: 2,
     });
 
+  const oneSetName = sets[0]?.name ?? "1996 Bandai Carddass Part 1 Green";
+
   if (loading) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-black text-white">
-        Loading...
+        <div className="rounded-3xl border border-white/10 bg-zinc-950/70 px-8 py-6 shadow-2xl backdrop-blur">
+          <div className="text-lg font-semibold">Loading Collection...</div>
+          <div className="mt-2 text-sm text-zinc-400">
+            Pulling your cards, scans, values, and progress.
+          </div>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-black text-white p-6">
+    <main className="min-h-screen bg-black text-white p-4 sm:p-6">
       {/* HERO / GLOBAL HEADER */}
       <div className="mb-8 overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/70 shadow-2xl backdrop-blur">
         <div className="bg-gradient-to-r from-yellow-500/10 via-transparent to-emerald-500/10 p-5 sm:p-6">
@@ -142,12 +149,11 @@ export default function Dashboard() {
               </h1>
 
               <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400 sm:text-base">
-                This collection currently includes{" "}
-                <span className="font-semibold text-white">
-                  1996 Bandai Carddass Part 1 Green
-                </span>
-                , the very first Pokémon cards ever released. The system is
-                already built to support more sets as the collection grows.
+                This app currently tracks{" "}
+                <span className="font-semibold text-white">{oneSetName}</span>,
+                the very first Pokémon cards ever released. Your collection
+                value, grading info, score averages, and purchase history all
+                build from here as you grow the set.
               </p>
 
               <div className="mt-4 flex flex-wrap gap-3 text-xs text-zinc-300">
@@ -164,7 +170,10 @@ export default function Dashboard() {
                 </div>
 
                 <div className="rounded-full border border-purple-500/20 bg-purple-500/10 px-3 py-1 text-purple-200">
-                  Avg score: {globalAverageScore > 0 ? globalAverageScore.toFixed(1) : "—"}
+                  Avg score:{" "}
+                  {globalAverageScore > 0
+                    ? globalAverageScore.toFixed(1)
+                    : "—"}
                 </div>
               </div>
             </div>
@@ -248,6 +257,29 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* EMPTY STATE */}
+      {sets.length > 0 && totalOwned === 0 && (
+        <div className="mb-8 overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/70 p-6 shadow-2xl backdrop-blur">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-2xl font-semibold">Your collection is empty</div>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
+                Start by opening the set and scanning your first card. Once you
+                add cards, this dashboard will track your completion, average
+                score, grading totals, purchase history, and overall collection
+                value.
+              </p>
+            </div>
+
+            <Link href={`/set/${sets[0].id}`}>
+              <button className="rounded-2xl bg-gradient-to-r from-yellow-400 to-yellow-200 px-5 py-3 font-semibold text-black transition hover:scale-[1.02]">
+                Open First Set
+              </button>
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* SET GRID */}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
         {sets.map((set) => {
@@ -256,7 +288,8 @@ export default function Dashboard() {
           );
 
           const ownedCount = setRows.length;
-          const gradedCount = setRows.filter((row) => Boolean(row.is_graded)).length;
+          const gradedCount = setRows.filter((row) => Boolean(row.is_graded))
+            .length;
 
           const setAverageScore = (() => {
             const scored = setRows.filter(
@@ -280,6 +313,19 @@ export default function Dashboard() {
 
             return sum + (Number.isFinite(price) ? price : 0);
           }, 0);
+
+          const bestScore = (() => {
+            const scored = setRows
+              .map((row) =>
+                row.score !== null && row.score !== undefined
+                  ? Number(row.score)
+                  : NaN
+              )
+              .filter((value) => Number.isFinite(value));
+
+            if (!scored.length) return 0;
+            return Math.max(...scored);
+          })();
 
           const percent =
             set.totalCards > 0
@@ -309,7 +355,7 @@ export default function Dashboard() {
                     }}
                   />
 
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
 
                   {isComplete && (
                     <div className="absolute top-2 right-2 rounded-full bg-yellow-400 px-2.5 py-1 text-[10px] font-semibold tracking-wide text-black">
@@ -336,6 +382,13 @@ export default function Dashboard() {
                         <span className="text-zinc-400">Avg score</span>
                         <span className="text-zinc-100">
                           {setAverageScore > 0 ? setAverageScore.toFixed(1) : "—"}
+                        </span>
+                      </div>
+
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <span className="text-zinc-400">Best score</span>
+                        <span className="text-zinc-100">
+                          {bestScore > 0 ? bestScore.toFixed(1) : "—"}
                         </span>
                       </div>
 
