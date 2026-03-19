@@ -1,10 +1,12 @@
 "use client";
 
-import { useParams } from "next/navigation";
 import Link from "next/link";
 
-export default function CardPage() {
-  const params = useParams();
+export default function CardPage({
+  params,
+}: {
+  params: { id: string };
+}) {
   const id = params.id;
 
   return (
